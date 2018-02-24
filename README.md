@@ -26,12 +26,13 @@ Sensors are read every 30 seconds. Every 5 minutes all buses are
 scanned again, so hot-wiring new sensors and removing failed once
 is possible without disconecting the node.
 
-# MQTT Topics
+## MQTT Topics
 Heartbeat (lwt) and sensors are published. For each sensors full
 scratchpad and human readable float temperature is published like
 this, using ESP ID for heartbeat and sensor addresses:
 
-```darauble/wifitemp/AC5359/hb online
+```
+darauble/wifitemp/AC5359/hb online
 darauble/ds18x20/28FF4011811604F8/scratchpad 6A014B467FFF0C10B8
 darauble/ds18x20/28FF4011811604F8/temperature 22.62500
 darauble/ds18x20/28FF36407516044D/scratchpad 69014B467FFF0C107D
@@ -45,6 +46,5 @@ darauble/ds18x20/28FF891C8016041F/temperature 22.81250
 darauble/ds18x20/28FF4011811604F8/scratchpad 6B014B467FFF0C10FB
 darauble/ds18x20/28FF4011811604F8/temperature 22.68750
 darauble/ds18x20/28FF36407516044D/scratchpad 6A014B467FFF0C10B8
-darauble/ds18x20/28FF36407516044D/temperature 22.62500```
-
-
+darauble/ds18x20/28FF36407516044D/temperature 22.62500
+```
