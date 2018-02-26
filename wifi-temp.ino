@@ -42,6 +42,14 @@ const PROGMEM char* F_TEMP             = "%.5f";
 const PROGMEM char* ONLINE             = "online";
 const PROGMEM char* OFFLINE            = "offline";
 
+//#define DEBUG 1
+
+#ifdef DEBUG
+const PROGMEM char* MQTT_DEBUG_TOPIC    = "darauble/ds18x20/%02X%02X%02X%02X%02X%02X%02X%02X/debug";
+const PROGMEM char* debug_pat = "%d, %04X, %.5f";
+char debug_buf[200];
+#endif
+
 #define D0              16        //WAKE  =>  16
 #define D1              5         //IOS   =>  5
 #define D2              4         //      =>  4
@@ -334,13 +342,23 @@ void check_status()
     } else {
       mqttClient.publish(status_topic, SW_ON, true);
     }//*/
-    float temp_c = 0;
+    float temp_c;
+    int16_t raw;
     
     for (int i=0; i<sensors_count; i++) {
-      temp_c = 0.0078125*
-        (float)
-        ((((int16_t) sensors[i].scratchpad[1]) << 11)
+      
+      raw = ((((int16_t) sensors[i].scratchpad[1]) << 11)
         | (((int16_t) sensors[i].scratchpad[0]) << 3));
+
+      temp_c = 0.0078125*(float) raw;
+#ifdef DEBUG
+      sprintf_P(topic_buf, MQTT_DEBUG_TOPIC,
+        sensors[i].addr[0], sensors[i].addr[1], sensors[i].addr[2], sensors[i].addr[3],
+        sensors[i].addr[4], sensors[i].addr[5], sensors[i].addr[6], sensors[i].addr[7]
+      );
+      sprintf_P(debug_buf, debug_pat, raw, raw, temp_c);
+      mqttClient.publish(topic_buf, debug_buf, false);
+#endif
       
       Serial.print(sensors[i].bus);
       Serial.print(" ");
