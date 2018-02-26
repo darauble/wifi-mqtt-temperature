@@ -38,7 +38,7 @@ const PROGMEM char* MQTT_LWT_TOPIC     = "darauble/wifitemp/%s/hb";
 const PROGMEM char* MQTT_SCRATCH_TOPIC = "darauble/ds18x20/%02X%02X%02X%02X%02X%02X%02X%02X/scratchpad";
 const PROGMEM char* MQTT_TEMP_TOPIC    = "darauble/ds18x20/%02X%02X%02X%02X%02X%02X%02X%02X/temperature";
 const PROGMEM char* F_SCRATCH          = "%02X%02X%02X%02X%02X%02X%02X%02X%02X";
-const PROGMEM char* F_TEMP             = "%.5f";
+const PROGMEM char* F_TEMP             = "%.7f";
 const PROGMEM char* ONLINE             = "online";
 const PROGMEM char* OFFLINE            = "offline";
 
@@ -160,20 +160,6 @@ void saveConfigCb()
   saveConfig = true;
 }
 
-void subCb(char* t, byte* p, unsigned int plen)
-{
-  /*if (strcmp(t, switch_topic) == 0) {
-    if (strncmp((char*) p, SW_ON, plen) == 0) {
-      digitalWrite(LED_PIN, LOW);
-      digitalWrite(RELAY_PIN, HIGH);
-    } else if (strncmp((char*) p, SW_OFF, plen) == 0) {
-      digitalWrite(LED_PIN, HIGH);
-      digitalWrite(RELAY_PIN, LOW);
-    }
-    sendStatus = true;
-  }//*/
-}
-
 void initStrings()
 {
   sprintf(esp_id, ESP_ID, ESP.getChipId());
@@ -185,11 +171,7 @@ void setup()
   Serial.begin(115200);
   Serial.println("Darau, ble - WiFi temperature reader");
 
-  //pinMode(RELAY_PIN, OUTPUT);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
-  //pinMode(LED_PIN, OUTPUT);
-  //digitalWrite(LED_PIN, HIGH);
-  //digitalWrite(RELAY_PIN, LOW);
 
   initStrings();
   
@@ -281,8 +263,7 @@ void setup()
 
   WiFi.hostByName(mqtt_server, mqtt_server_ip);
   mqttClient.setServer(mqtt_server_ip, atoi(mqtt_port));
-  mqttClient.setCallback(subCb);
-
+  
   for (int i=0; i<MQTT_RETRY_CNT; i++) {
     sprintf_P(topic_buf, MQTT_LWT_TOPIC, esp_id);
     if (strlen(mqtt_usr) > 0) {
@@ -297,7 +278,6 @@ void setup()
   }
 
   if (mqttClient.connected()) {
-    //mqttClient.subscribe(switch_topic);
     sprintf_P(topic_buf, MQTT_LWT_TOPIC, esp_id);
     mqttClient.publish(topic_buf, ONLINE, 1);
   } else {
@@ -334,14 +314,25 @@ void setup()
   ArduinoOTA.begin();
 }
 
+void beautifyFloatStr(char *str)
+{
+  uint16_t l = strlen(str);
+  int i;
+  for (i = l-1; i >= 0; i--) {
+    if (str[i] == '0') {
+      str[i] = 0;
+    } else if (str[i] == '.') {
+      str[i] = 0;
+      break;
+    } else {
+      break;
+    }
+  }
+}
+
 void check_status()
 {
   if (sendStatus) {
-    /*if (digitalRead(RELAY_PIN) == LOW) {
-      mqttClient.publish(status_topic, SW_OFF, true);
-    } else {
-      mqttClient.publish(status_topic, SW_ON, true);
-    }//*/
     float temp_c;
     int16_t raw;
     
@@ -387,6 +378,7 @@ void check_status()
         sensors[i].addr[4], sensors[i].addr[5], sensors[i].addr[6], sensors[i].addr[7]
       );
       sprintf_P(value_buf, F_TEMP, temp_c);
+      beautifyFloatStr(value_buf);
       mqttClient.publish(topic_buf, value_buf, false);
     }
     sendStatus = false;
