@@ -23,7 +23,7 @@ On startup each bus is scanned for sensors. Maximum number of overall
 sensors is defined as 20, but this count can be increased if required.
 
 Sensors are read every 30 seconds. Every 5 minutes all buses are
-scanned again, so hot-wiring new sensors and removing failed once
+scanned again, so hot-wiring new sensors and removing failed ones
 is possible without disconecting the node.
 
 ## MQTT Topics
