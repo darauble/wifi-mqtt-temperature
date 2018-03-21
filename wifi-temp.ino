@@ -35,6 +35,7 @@ const PROGMEM char* CFG_FILE           = "/cfg.json";
 const PROGMEM char* ESP_ID             = "%06X";
 const PROGMEM char* HOST_NAME          = "WIFITEMP-%s";
 const PROGMEM char* MQTT_LWT_TOPIC     = "darauble/wifitemp/%s/hb";
+const PROGMEM char* MQTT_IP_TOPIC      = "darauble/wifitemp/%s/ip";
 const PROGMEM char* MQTT_SCRATCH_TOPIC = "darauble/ds18x20/%02X%02X%02X%02X%02X%02X%02X%02X/scratchpad";
 const PROGMEM char* MQTT_TEMP_TOPIC    = "darauble/ds18x20/%02X%02X%02X%02X%02X%02X%02X%02X/temperature";
 const PROGMEM char* F_SCRATCH          = "%02X%02X%02X%02X%02X%02X%02X%02X%02X";
@@ -75,7 +76,6 @@ char debug_buf[200];
 #define USR_PWD_LEN 20
 
 #define RESET_CNT 100
-#define MQTT_RETRY_CNT 10
 
 #define STATE_SEARCH 0
 #define STATE_START 1
@@ -100,6 +100,7 @@ boolean OTAupdate = false;
 
 Ticker btn_timer;
 WiFiClient wifiClient;
+WiFiManager wifiManager;
 PubSubClient mqttClient(wifiClient);
 IPAddress mqtt_server_ip;
 
@@ -122,16 +123,18 @@ DallasTemperature dt[OW_BUS_CNT] = {
 tsensor sensors[MAX_SENSOR_CNT];
 uint8_t sensors_count = 0;
 
-
-
+boolean restartFlag = false;
 boolean resetFlag = false;
+
 void check_reset()
 {
-  if (resetFlag) {
-    WiFi.disconnect();
-    delay(3000);
+  if (resetFlag || restartFlag) {
+    if (resetFlag) {
+      WiFi.disconnect();
+    }
+    delay(1000);
     ESP.reset();
-    delay(3000);
+    delay(2000);
   }
 }
 
@@ -166,10 +169,31 @@ void initStrings()
   sprintf(hostname, HOST_NAME, esp_id);
 }
 
+boolean mqttConnect()
+{
+  sprintf_P(topic_buf, MQTT_LWT_TOPIC, esp_id);
+  if (strlen(mqtt_usr) > 0) {
+    mqttClient.connect(hostname, mqtt_usr, mqtt_pwd, topic_buf, 0, 1, OFFLINE);
+  } else {
+    mqttClient.connect(hostname, topic_buf, 0, 1, OFFLINE);
+  }
+
+  if (mqttClient.connected()) {
+    mqttClient.publish(topic_buf, ONLINE, 1);
+    sprintf_P(topic_buf, MQTT_IP_TOPIC, esp_id);
+    mqttClient.publish(topic_buf, WiFi.localIP().toString().c_str(), 1);
+    return true;
+  } else {
+    Serial.println("MQTT not connected!");
+  }
+  
+  return false;
+}
+
 void setup()
 {
   Serial.begin(115200);
-  Serial.println("Darau, ble - WiFi temperature reader");
+  Serial.println("Darau, ble - WiFi temperature reader, #WDT reset");
 
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 
@@ -211,6 +235,10 @@ void setup()
     Serial.println("SPIFFS failed :-(");
   }
 
+  if (!WiFi.getAutoConnect()) {
+    Serial.println("Enabling WiFi auto connect...");
+    WiFi.setAutoConnect(true);
+  }
   WiFi.hostname(hostname);
 
   // WifiManager init
@@ -219,8 +247,8 @@ void setup()
   WiFiManagerParameter custom_mqtt_usr("usr", "mqtt usr", mqtt_usr, USR_PWD_LEN);
   WiFiManagerParameter custom_mqtt_pwd("pwd", "mqtt pwd", mqtt_pwd, USR_PWD_LEN);
 
-  WiFiManager wifiManager;
-
+  wifiManager.setConnectTimeout(30);
+  wifiManager.setConfigPortalTimeout(60);
   wifiManager.setSaveConfigCallback(saveConfigCb);
   wifiManager.addParameter(&custom_mqtt_server);
   wifiManager.addParameter(&custom_mqtt_port);
@@ -228,12 +256,13 @@ void setup()
   wifiManager.addParameter(&custom_mqtt_pwd);
 
   if (!wifiManager.autoConnect(hostname)) {
-    delay(3000);
-    ESP.reset();
-    delay(3000);
+    Serial.println("Could not connect to WiFi, rebooting...");
+    delay(1000);
+    ESP.restart();
+    delay(2000);
+  } else {
+    Serial.println("Connected to WiFi");
   }
-
-  Serial.println("Connected to WiFi");
   
   strcpy(mqtt_server, custom_mqtt_server.getValue());
   strcpy(mqtt_port, custom_mqtt_port.getValue());
@@ -261,29 +290,11 @@ void setup()
     saveConfig = false;
   }
 
+  delay(3000);// Let the WiFi connection to stabilize, otherwise MQTT will be connected one minute later
   WiFi.hostByName(mqtt_server, mqtt_server_ip);
   mqttClient.setServer(mqtt_server_ip, atoi(mqtt_port));
+  mqttConnect();
   
-  for (int i=0; i<MQTT_RETRY_CNT; i++) {
-    sprintf_P(topic_buf, MQTT_LWT_TOPIC, esp_id);
-    if (strlen(mqtt_usr) > 0) {
-      if (!mqttClient.connect(hostname, mqtt_usr, mqtt_pwd, topic_buf, 0, 1, OFFLINE)) {
-        delay(3000);
-      }
-    } else {
-      if (!mqttClient.connect(hostname, topic_buf, 0, 1, OFFLINE)) {
-        delay(3000);
-      }
-    }
-  }
-
-  if (mqttClient.connected()) {
-    sprintf_P(topic_buf, MQTT_LWT_TOPIC, esp_id);
-    mqttClient.publish(topic_buf, ONLINE, 1);
-  } else {
-    Serial.println("MQTT connection failed!");
-  }
-
   ArduinoOTA.setHostname(hostname);
   ArduinoOTA.setPassword((const char *)WiFi.psk().c_str());
   ArduinoOTA.onStart([]() {
@@ -385,34 +396,28 @@ void check_status()
   }
 }
 
-boolean restartFlag = false;
-
-void check_restart()
-{
-  if (restartFlag) {
-    delay(3000);
-    ESP.restart();
-  }
-}
-
 int connect_ms = 0;
+int connect_check = 60000;
+
 void check_connection()
 {
   int cur_ms = millis();
-  if (cur_ms > connect_ms+60000 || cur_ms < connect_ms) {
+  if (cur_ms > connect_ms+connect_check || cur_ms < connect_ms) {
     connect_ms = cur_ms;
     if (WiFi.status() == WL_CONNECTED)  {
       if (mqttClient.connected()) {
         Serial.println("MQTT connection ok");
+        connect_check = 60000;
       } 
       else {
-        Serial.println("MQTT connection failed");
-        restartFlag = true;
+        Serial.println("MQTT connection failed, try to reconnect");
+        //restartFlag = true;
+        mqttConnect();
+        connect_check = 5000; // Make retries fire more often
       }
     }
     else { 
-      Serial.println("WiFi connection failed");
-      restartFlag = true;
+      Serial.println("WiFi connection failed, wait for better times");
     }
   }
 }
@@ -486,7 +491,7 @@ void temperature_loop()
       if (cur_ms - search_ms <= 300000) {
         state = STATE_START;
       } else {
-        // Perform re-reading of the busses every 5 minutes
+        // Perform re-reading of the buses every 5 minutes
         state = STATE_SEARCH;
       }
     break;// end rollover
@@ -503,5 +508,6 @@ void loop()
     check_connection();
     check_reset();
   }
+  yield();
 }
 
